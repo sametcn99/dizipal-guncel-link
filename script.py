@@ -1,10 +1,11 @@
 import concurrent.futures
 import requests
 from bs4 import BeautifulSoup
+from tqdm import tqdm
 
 # Constants for the script
 MAX_RETRIES = 3
-CHUNKS = 50
+CHUNKS = 10
 TIMEOUT = 3
 START_RANGE = 600
 END_RANGE = 750
@@ -23,7 +24,6 @@ def fetch_page_content(url):
         response.raise_for_status()
         return response.text
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching {url}: {e}")
         return None
 
 # Function to find active sites based on specified meta tag names
@@ -34,34 +34,20 @@ def find_active_sites(meta_tag_names):
     # Using ThreadPoolExecutor for concurrent execution
     with concurrent.futures.ThreadPoolExecutor() as executor:
         site_urls = [base_url.format(i) for i in range(START_RANGE, END_RANGE)]
-
         # Divide the site URLs into chunks for parallel processing
-        for chunk_start in range(0, len(site_urls), CHUNKS):
+        for chunk_start in tqdm(range(0, len(site_urls), CHUNKS), desc="Processing Chunks"):
             chunk = site_urls[chunk_start:chunk_start + CHUNKS]
-
-            # Display information about the current chunk
-            print("----------------------------------------------")
-            print(f"Processing chunk: {chunk}")
-            print(f"Total chunks: {len(site_urls) // CHUNKS + 1}")
-            print(f"Total sites in current chunk: {len(chunk)}")
-            print("----------------------------------------------")
-
-            # Use executor.map to parallelize the site checking
-            results = executor.map(lambda site_url: check_site(site_url, meta_tag_names), chunk)
-            
-            # Collect the results and display active sites
-            active_sites.extend(result for result in results if result)
-
-            for result in results:
-                if result:
-                    print("----------------------------------------------")
-                    print(f"Active site: {result[0]} - Title: {result[1]}")
-                    print("----------------------------------------------")
+            with tqdm(total=len(chunk), desc="Processing Sites", leave=False) as site_progress:
+                # Use executor.map to parallelize the site checking
+                results = executor.map(lambda site_url: check_site(site_url, meta_tag_names, site_progress), chunk)
+                # Collect the results and display active sites
+                active_sites.extend(result for result in results if result)
+                site_progress.close()
 
     return active_sites
 
 # Function to check if a site is active based on meta tag names and keywords in the title
-def check_site(site_url, meta_tag_names):
+def check_site(site_url, meta_tag_names, site_progress):
     for attempt in range(MAX_RETRIES):
         page_content = fetch_page_content(site_url)
 
@@ -77,11 +63,13 @@ def check_site(site_url, meta_tag_names):
 
             # Check if keywords are present in the title
             if any(keyword in title for keyword in ["Dizipal", "DizipalX"]):
+                site_progress.update(1)
                 print("----------------------------------------------")
                 print(f"Active site: {site_url} - Title: {title}")
                 print("----------------------------------------------")
                 return site_url, title
 
+    site_progress.update(1)
     return None
 
 # Main function to orchestrate the script
